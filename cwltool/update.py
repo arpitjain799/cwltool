@@ -48,7 +48,8 @@ def v1_2to1_3dev1(
                         s["when"] = r["loopWhen"]
                         if "loop" in r:
                             for el in r["loop"]:
-                                if (source := el.pop("loopSource", None)) is not None:
+                                source = el.pop("loopSource", None)
+                                if source is not None:
                                     el["outputSource"] = source
                             s["loop"] = r["loop"]
                         if "outputMethod" in r:
