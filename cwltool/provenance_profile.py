@@ -7,20 +7,22 @@ from io import BytesIO
 from pathlib import PurePath, PurePosixPath
 from socket import getfqdn
 from typing import (
+    TYPE_CHECKING,
     Any,
+    Dict,
     List,
     MutableMapping,
     MutableSequence,
     Optional,
+    Sequence,
     Tuple,
     Union,
     cast,
 )
 
-from prov.identifier import Identifier
+from prov.identifier import Identifier, QualifiedName
 from prov.model import PROV, PROV_LABEL, PROV_TYPE, PROV_VALUE, ProvDocument, ProvEntity
 from schema_salad.sourceline import SourceLine
-from typing_extensions import TYPE_CHECKING
 
 from .errors import WorkflowException
 from .job import CommandLineJob, JobBase
@@ -52,14 +54,12 @@ if TYPE_CHECKING:
     from .provenance import ResearchObject
 
 
-def copy_job_order(
-    job: Union[Process, JobsType], job_order_object: CWLObjectType
-) -> CWLObjectType:
+def copy_job_order(job: Union[Process, JobsType], job_order_object: CWLObjectType) -> CWLObjectType:
     """Create copy of job object for provenance."""
     if not isinstance(job, WorkflowJob):
         # direct command line tool execution
         return job_order_object
-    customised_job = {}  # type: CWLObjectType
+    customised_job: CWLObjectType = {}
     # new job object for RO
     debug = _logger.isEnabledFor(logging.DEBUG)
     for each, i in enumerate(job.tool["inputs"]):
@@ -101,7 +101,7 @@ class ProvenanceProfile:
         self.document = ProvDocument()
         self.host_provenance = host_provenance
         self.user_provenance = user_provenance
-        self.engine_uuid = research_object.engine_uuid  # type: str
+        self.engine_uuid = research_object.engine_uuid
         self.add_to_manifest = self.research_object.add_to_manifest
         if self.orcid:
             _logger.debug("[provenance] Creator ORCID: %s", self.orcid)
@@ -109,7 +109,7 @@ class ProvenanceProfile:
         if self.full_name:
             _logger.debug("[provenance] Creator Full name: %s", self.full_name)
         self.workflow_run_uuid = run_uuid or uuid.uuid4()
-        self.workflow_run_uri = self.workflow_run_uuid.urn  # type: str
+        self.workflow_run_uri = self.workflow_run_uuid.urn
         self.generate_prov_doc()
 
     def __str__(self) -> str:
@@ -170,9 +170,7 @@ class ProvenanceProfile:
         )
         ro_identifier_workflow = self.research_object.base_uri + "workflow/packed.cwl#"
         self.wf_ns = self.document.add_namespace("wf", ro_identifier_workflow)
-        ro_identifier_input = (
-            self.research_object.base_uri + "workflow/primary-job.json#"
-        )
+        ro_identifier_input = self.research_object.base_uri + "workflow/primary-job.json#"
         self.document.add_namespace("input", ro_identifier_input)
 
         # More info about the account (e.g. username, fullname)
@@ -181,7 +179,10 @@ class ProvenanceProfile:
         # by a user account, as cwltool is a command line tool
         account = self.document.agent(ACCOUNT_UUID)
         if self.orcid or self.full_name:
-            person = {PROV_TYPE: PROV["Person"], "prov:type": SCHEMA["Person"]}
+            person: Dict[Union[str, Identifier], Any] = {
+                PROV_TYPE: PROV["Person"],
+                "prov:type": SCHEMA["Person"],
+            }
             if self.full_name:
                 person["prov:label"] = self.full_name
                 person["foaf:name"] = self.full_name
@@ -220,9 +221,7 @@ class ProvenanceProfile:
         )
         # association between SoftwareAgent and WorkflowRun
         main_workflow = "wf:main"
-        self.document.wasAssociatedWith(
-            self.workflow_run_uri, self.engine_uuid, main_workflow
-        )
+        self.document.wasAssociatedWith(self.workflow_run_uri, self.engine_uuid, main_workflow)
         self.document.wasStartedBy(
             self.workflow_run_uri, None, self.engine_uuid, datetime.datetime.now()
         )
@@ -281,9 +280,7 @@ class ProvenanceProfile:
         self.document.wasAssociatedWith(
             process_run_id, self.engine_uuid, str("wf:main/" + process_name)
         )
-        self.document.wasStartedBy(
-            process_run_id, None, self.workflow_run_uri, when, None, None
-        )
+        self.document.wasStartedBy(process_run_id, None, self.workflow_run_uri, when, None, None)
         return process_run_id
 
     def record_process_end(
@@ -300,7 +297,7 @@ class ProvenanceProfile:
         if value["class"] != "File":
             raise ValueError("Must have class:File: %s" % value)
         # Need to determine file hash aka RO filename
-        entity = None  # type: Optional[ProvEntity]
+        entity: Optional[ProvEntity] = None
         checksum = None
         if "checksum" in value:
             csum = cast(str, value["checksum"])
@@ -315,9 +312,7 @@ class ProvenanceProfile:
                 relative_path = self.research_object.add_data_file(fhandle)
                 # FIXME: This naively relies on add_data_file setting hash as filename
                 checksum = PurePath(relative_path).name
-                entity = self.document.entity(
-                    "data:" + checksum, {PROV_TYPE: WFPROV["Artifact"]}
-                )
+                entity = self.document.entity("data:" + checksum, {PROV_TYPE: WFPROV["Artifact"]})
                 if "checksum" not in value:
                     value["checksum"] = f"{SHA1}${checksum}"
 
@@ -327,33 +322,29 @@ class ProvenanceProfile:
 
         # By here one of them should have worked!
         if not entity or not checksum:
-            raise ValueError(
-                "class:File but missing checksum/location/content: %r" % value
-            )
+            raise ValueError("class:File but missing checksum/location/content: %r" % value)
 
         # Track filename and extension, this is generally useful only for
         # secondaryFiles. Note that multiple uses of a file might thus record
         # different names for the same entity, so we'll
         # make/track a specialized entity by UUID
-        file_id = value.setdefault("@id", uuid.uuid4().urn)
+        file_id = cast(str, value.setdefault("@id", uuid.uuid4().urn))
         # A specialized entity that has just these names
         file_entity = self.document.entity(
             file_id,
             [(PROV_TYPE, WFPROV["Artifact"]), (PROV_TYPE, WF4EVER["File"])],
-        )  # type: ProvEntity
+        )
 
         if "basename" in value:
-            file_entity.add_attributes({CWLPROV["basename"]: value["basename"]})
+            file_entity.add_attributes({CWLPROV["basename"]: cast(str, value["basename"])})
         if "nameroot" in value:
-            file_entity.add_attributes({CWLPROV["nameroot"]: value["nameroot"]})
+            file_entity.add_attributes({CWLPROV["nameroot"]: cast(str, value["nameroot"])})
         if "nameext" in value:
-            file_entity.add_attributes({CWLPROV["nameext"]: value["nameext"]})
+            file_entity.add_attributes({CWLPROV["nameext"]: cast(str, value["nameext"])})
         self.document.specializationOf(file_entity, entity)
 
         # Check for secondaries
-        for sec in cast(
-            MutableSequence[CWLObjectType], value.get("secondaryFiles", [])
-        ):
+        for sec in cast(MutableSequence[CWLObjectType], value.get("secondaryFiles", [])):
             # TODO: Record these in a specializationOf entity with UUID?
             if sec["class"] == "File":
                 (sec_entity, _, _) = self.declare_file(sec)
@@ -395,6 +386,10 @@ class ProvenanceProfile:
                 (PROV_TYPE, RO["Folder"]),
             ],
         )
+
+        if "basename" in value:
+            coll.add_attributes({CWLPROV["basename"]: cast(str, value["basename"])})
+
         # ORE description of ro:Folder, saved separately
         coll_b = dir_bundle.entity(
             dir_id,
@@ -406,8 +401,10 @@ class ProvenanceProfile:
         #     dir_bundle.identifier, {PROV["type"]: ORE["ResourceMap"],
         #                             ORE["describes"]: coll_b.identifier})
 
-        coll_attribs = [(ORE["isDescribedBy"], dir_bundle.identifier)]
-        coll_b_attribs = []  # type: List[Tuple[Identifier, ProvEntity]]
+        coll_attribs: List[Tuple[Union[str, Identifier], Any]] = [
+            (ORE["isDescribedBy"], dir_bundle.identifier)
+        ]
+        coll_b_attribs: List[Tuple[Union[str, Identifier], Any]] = []
 
         # FIXME: .listing might not be populated yet - hopefully
         # a later call to this method will sort that
@@ -433,7 +430,7 @@ class ProvenanceProfile:
 
             m_entity.add_attributes(
                 {
-                    PROV["pairKey"]: entry["basename"],
+                    PROV["pairKey"]: cast(str, entry["basename"]),
                     PROV["pairEntity"]: entity,
                 }
             )
@@ -444,7 +441,7 @@ class ProvenanceProfile:
             m_b.add_asserted_type(ORE["Proxy"])
             m_b.add_attributes(
                 {
-                    RO["entryName"]: entry["basename"],
+                    RO["entryName"]: cast(str, entry["basename"]),
                     ORE["proxyIn"]: coll,
                     ORE["proxyFor"]: entity,
                 }
@@ -465,9 +462,7 @@ class ProvenanceProfile:
         ore_doc_path = str(PurePosixPath(METADATA, ore_doc_fn))
         with self.research_object.write_bag_file(ore_doc_path) as provenance_file:
             ore_doc.serialize(provenance_file, format="rdf", rdf_format="turtle")
-        self.research_object.add_annotation(
-            dir_id, [ore_doc_fn], ORE["isDescribedBy"].uri
-        )
+        self.research_object.add_annotation(dir_id, [ore_doc_fn], ORE["isDescribedBy"].uri)
 
         if is_empty:
             # Empty directory
@@ -485,7 +480,7 @@ class ProvenanceProfile:
         data_id = "data:%s" % PurePosixPath(data_file).stem
         entity = self.document.entity(
             data_id, {PROV_TYPE: WFPROV["Artifact"], PROV_VALUE: str(value)}
-        )  # type: ProvEntity
+        )
         return entity, checksum
 
     def declare_artefact(self, value: Any) -> ProvEntity:
@@ -525,7 +520,7 @@ class ProvenanceProfile:
                 # Already processed this value, but it might not be in this PROV
                 entities = self.document.get_record(value["@id"])
                 if entities:
-                    return entities[0]
+                    return cast(List[ProvEntity], entities)[0]
                 # else, unknown in PROV, re-add below as if it's fresh
 
             # Base case - we found a File we need to update
@@ -556,8 +551,8 @@ class ProvenanceProfile:
                 coll.add_asserted_type(CWLPROV[value["class"]])
 
             # Let's iterate and recurse
-            coll_attribs = []  # type: List[Tuple[Identifier, ProvEntity]]
-            for (key, val) in value.items():
+            coll_attribs: List[Tuple[Union[str, Identifier], Any]] = []
+            for key, val in value.items():
                 v_ent = self.declare_artefact(val)
                 self.document.membership(coll, v_ent)
                 m_entity = self.document.entity(uuid.uuid4().urn)
@@ -565,9 +560,7 @@ class ProvenanceProfile:
                 # https://www.w3.org/TR/prov-dictionary/#dictionary-ontological-definition
                 # as prov.py do not easily allow PROV-N extensions
                 m_entity.add_asserted_type(PROV["KeyEntityPair"])
-                m_entity.add_attributes(
-                    {PROV["pairKey"]: str(key), PROV["pairEntity"]: v_ent}
-                )
+                m_entity.add_attributes({PROV["pairKey"]: str(key), PROV["pairEntity"]: v_ent})
                 coll_attribs.append((PROV["hadDictionaryMember"], m_entity))
             coll.add_attributes(coll_attribs)
             self.research_object.add_uri(coll.identifier.uri)
@@ -709,20 +702,20 @@ class ProvenanceProfile:
             )
         # TODO: Declare roles/parameters as well
 
-    def activity_has_provenance(self, activity, prov_ids):
-        # type: (str, List[Identifier]) -> None
+    def activity_has_provenance(self, activity: str, prov_ids: Sequence[Identifier]) -> None:
         """Add http://www.w3.org/TR/prov-aq/ relations to nested PROV files."""
         # NOTE: The below will only work if the corresponding metadata/provenance arcp URI
         # is a pre-registered namespace in the PROV Document
-        attribs = [(PROV["has_provenance"], prov_id) for prov_id in prov_ids]
+        attribs: List[Tuple[Union[str, Identifier], Any]] = [
+            (PROV["has_provenance"], prov_id) for prov_id in prov_ids
+        ]
         self.document.activity(activity, other_attributes=attribs)
         # Tip: we can't use https://www.w3.org/TR/prov-links/#term-mention
         # as prov:mentionOf() is only for entities, not activities
         uris = [i.uri for i in prov_ids]
         self.research_object.add_annotation(activity, uris, PROV["has_provenance"].uri)
 
-    def finalize_prov_profile(self, name):
-        # type: (Optional[str]) -> List[Identifier]
+    def finalize_prov_profile(self, name: Optional[str]) -> List[QualifiedName]:
         """Transfer the provenance related files to the RO."""
         # NOTE: Relative posix path
         if name is None:
@@ -750,9 +743,7 @@ class ProvenanceProfile:
             prov_ids.append(self.provenance_ns[filename + ".xml"])
 
         # https://www.w3.org/TR/prov-n/
-        with self.research_object.write_bag_file(
-            basename + ".provn"
-        ) as provenance_file:
+        with self.research_object.write_bag_file(basename + ".provn") as provenance_file:
             self.document.serialize(provenance_file, format="provn", indent=2)
             prov_ids.append(self.provenance_ns[filename + ".provn"])
 
@@ -771,18 +762,14 @@ class ProvenanceProfile:
 
         # https://www.w3.org/TR/n-triples/
         with self.research_object.write_bag_file(basename + ".nt") as provenance_file:
-            self.document.serialize(
-                provenance_file, format="rdf", rdf_format="ntriples"
-            )
+            self.document.serialize(provenance_file, format="rdf", rdf_format="ntriples")
             prov_ids.append(self.provenance_ns[filename + ".nt"])
 
         # https://www.w3.org/TR/json-ld/
         # TODO: Use a nice JSON-LD context
         # see also https://eprints.soton.ac.uk/395985/
         # 404 Not Found on https://provenance.ecs.soton.ac.uk/prov.jsonld :(
-        with self.research_object.write_bag_file(
-            basename + ".jsonld"
-        ) as provenance_file:
+        with self.research_object.write_bag_file(basename + ".jsonld") as provenance_file:
             self.document.serialize(provenance_file, format="rdf", rdf_format="json-ld")
             prov_ids.append(self.provenance_ns[filename + ".jsonld"])
 

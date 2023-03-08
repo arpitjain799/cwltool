@@ -5,6 +5,8 @@ from pathlib import Path
 from stat import S_IWGRP, S_IWOTH, S_IWRITE
 from typing import Any
 
+import pytest
+
 from cwltool.factory import Factory
 from cwltool.main import main
 
@@ -23,6 +25,23 @@ def test_empty_file_creation() -> None:
     """An empty file can be created in InitialWorkingDirectory."""
     err_code, _, _ = get_main_output([get_data("tests/wf/iwdr-empty.cwl")])
     assert err_code == 0
+
+
+def test_passthrough_successive(tmp_path: Path) -> None:
+    """An empty file can be successively passed through a subdir of InitialWorkingDirectory."""
+    err_code, _, _ = get_main_output(
+        [
+            "--outdir",
+            str(tmp_path),
+            get_data("tests/wf/iwdr-passthrough-successive.cwl"),
+        ]
+    )
+    assert err_code == 0
+    children = sorted(tmp_path.glob("*"))  # This input directory should be left pristine.
+    assert len(children) == 1
+    subdir = tmp_path / children[0]
+    assert len(sorted(subdir.glob("*"))) == 1
+    assert (subdir / "file").exists()
 
 
 @needs_docker
@@ -53,7 +72,7 @@ def test_bad_listing_expression(tmp_path: Path) -> None:
     assert (
         "Expression in a 'InitialWorkdirRequirement.listing' field must return "
         "a list containing zero or more of: File or Directory objects; Dirent "
-        "objects. Got '42' among the results" in stderr
+        "objects. Got 42 among the results" in stderr
     )
     assert err_code == 1
 
@@ -112,7 +131,9 @@ def test_iwdr_permutations(tmp_path_factory: Any) -> None:
     )
     assert err_code == 0
     log = json.loads(stdout)["log"]
-    assert log["checksum"] == "sha1$bc51ebb3f65ca44282789dd1e6de9747d8abe75f", log
+    with open(log["path"]) as log_h:
+        log_text = log_h.read()
+    assert log["checksum"] == "sha1$bc51ebb3f65ca44282789dd1e6de9747d8abe75f", log_text
 
 
 def test_iwdr_permutations_readonly(tmp_path_factory: Any) -> None:
@@ -221,11 +242,15 @@ def test_iwdr_permutations_inplace(tmp_path_factory: Any) -> None:
     )
     assert err_code == 0
     log = json.loads(stdout)["log"]
-    assert log["checksum"] == "sha1$bc51ebb3f65ca44282789dd1e6de9747d8abe75f", log
+    with open(log["path"]) as log_h:
+        log_text = log_h.read()
+    assert log["checksum"] == "sha1$bc51ebb3f65ca44282789dd1e6de9747d8abe75f", log_text
 
 
 @needs_singularity
-def test_iwdr_permutations_singularity(tmp_path_factory: Any) -> None:
+def test_iwdr_permutations_singularity(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
     misc = tmp_path_factory.mktemp("misc")
     fifth = misc / "fifth"
     fifth.mkdir()
@@ -248,6 +273,8 @@ def test_iwdr_permutations_singularity(tmp_path_factory: Any) -> None:
     twelfth = misc / "twelfth"
     twelfth.touch()
     outdir = str(tmp_path_factory.mktemp("outdir"))
+    singularity_dir = str(tmp_path_factory.mktemp("singularity"))
+    monkeypatch.setenv("CWL_SINGULARITY_CACHE", singularity_dir)
     err_code, stdout, _ = get_main_output(
         [
             "--outdir",
@@ -279,11 +306,15 @@ def test_iwdr_permutations_singularity(tmp_path_factory: Any) -> None:
     )
     assert err_code == 0
     log = json.loads(stdout)["log"]
-    assert log["checksum"] == "sha1$bc51ebb3f65ca44282789dd1e6de9747d8abe75f", log
+    with open(log["path"]) as log_h:
+        log_text = log_h.read()
+    assert log["checksum"] == "sha1$bc51ebb3f65ca44282789dd1e6de9747d8abe75f", log_text
 
 
 @needs_singularity
-def test_iwdr_permutations_singularity_inplace(tmp_path_factory: Any) -> None:
+def test_iwdr_permutations_singularity_inplace(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """IWDR tests using --singularity and a forced InplaceUpdateRequirement."""
     misc = tmp_path_factory.mktemp("misc")
     fifth = misc / "fifth"
@@ -307,6 +338,8 @@ def test_iwdr_permutations_singularity_inplace(tmp_path_factory: Any) -> None:
     twelfth = misc / "twelfth"
     twelfth.touch()
     outdir = str(tmp_path_factory.mktemp("outdir"))
+    singularity_dir = str(tmp_path_factory.mktemp("singularity"))
+    monkeypatch.setenv("CWL_SINGULARITY_CACHE", singularity_dir)
     assert (
         main(
             [

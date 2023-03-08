@@ -1,5 +1,6 @@
 """Visualize a CWL workflow."""
 from pathlib import Path
+from typing import Iterator, List, cast
 from urllib.parse import urlparse
 
 import pydot
@@ -32,9 +33,12 @@ class CWLViewer:
     def _set_inner_edges(self) -> None:
         with open(_get_inner_edges_query_path) as f:
             get_inner_edges_query = f.read()
-        inner_edges = self._rdf_graph.query(
-            get_inner_edges_query, initBindings={"root_graph": self._root_graph_uri}
-        )
+        inner_edges = cast(
+            Iterator[rdflib.query.ResultRow],
+            self._rdf_graph.query(
+                get_inner_edges_query, initBindings={"root_graph": self._root_graph_uri}
+            ),
+        )  # ResultRow because the query is of type SELECT
         for inner_edge_row in inner_edges:
             source_label = (
                 inner_edge_row["source_label"]
@@ -48,9 +52,7 @@ class CWLViewer:
                 else "lightgoldenrodyellow"
             )
             source_style = (
-                "dashed"
-                if inner_edge_row["source_step_class"].endswith("Operation")
-                else "filled"
+                "dashed" if inner_edge_row["source_step_class"].endswith("Operation") else "filled"
             )
             n = pydot.Node(
                 "",
@@ -73,9 +75,7 @@ class CWLViewer:
                 else "lightgoldenrodyellow"
             )
             target_style = (
-                "dashed"
-                if inner_edge_row["target_step_class"].endswith("Operation")
-                else "filled"
+                "dashed" if inner_edge_row["target_step_class"].endswith("Operation") else "filled"
             )
             n = pydot.Node(
                 "",
@@ -103,9 +103,12 @@ class CWLViewer:
         inputs_subgraph.set("style", "dashed")
         inputs_subgraph.set("label", "Workflow Inputs")
 
-        input_edges = self._rdf_graph.query(
-            get_input_edges_query, initBindings={"root_graph": self._root_graph_uri}
-        )
+        input_edges = cast(
+            Iterator[rdflib.query.ResultRow],
+            self._rdf_graph.query(
+                get_input_edges_query, initBindings={"root_graph": self._root_graph_uri}
+            ),
+        )  # ResultRow because the query is of type SELECT
         for input_row in input_edges:
             n = pydot.Node(
                 "",
@@ -116,9 +119,7 @@ class CWLViewer:
             )
             n.set_name(str(input_row["input"]))
             inputs_subgraph.add_node(n)
-            self._dot_graph.add_edge(
-                pydot.Edge(str(input_row["input"]), str(input_row["step"]))
-            )
+            self._dot_graph.add_edge(pydot.Edge(str(input_row["input"]), str(input_row["step"])))
 
     def _set_output_edges(self) -> None:
         with open(_get_output_edges_query_path) as f:
@@ -130,9 +131,12 @@ class CWLViewer:
         outputs_graph.set("style", "dashed")
         outputs_graph.set("label", "Workflow Outputs")
         outputs_graph.set("labelloc", "b")
-        output_edges = self._rdf_graph.query(
-            get_output_edges, initBindings={"root_graph": self._root_graph_uri}
-        )
+        output_edges = cast(
+            Iterator[rdflib.query.ResultRow],
+            self._rdf_graph.query(
+                get_output_edges, initBindings={"root_graph": self._root_graph_uri}
+            ),
+        )  # ResultRow because the query is of type SELECT
         for output_edge_row in output_edges:
             n = pydot.Node(
                 "",
@@ -143,24 +147,25 @@ class CWLViewer:
             )
             n.set_name(str(output_edge_row["output"]))
             outputs_graph.add_node(n)
-            self._dot_graph.add_edge(
-                pydot.Edge(output_edge_row["step"], output_edge_row["output"])
-            )
+            self._dot_graph.add_edge(pydot.Edge(output_edge_row["step"], output_edge_row["output"]))
 
-    def _get_root_graph_uri(self) -> rdflib.URIRef:
+    def _get_root_graph_uri(self) -> rdflib.term.Identifier:
         with open(_get_root_query_path) as f:
             get_root_query = f.read()
-        root = list(
-            self._rdf_graph.query(
-                get_root_query,
-            )
-        )
+        root = cast(
+            List[rdflib.query.ResultRow],
+            list(
+                self._rdf_graph.query(
+                    get_root_query,
+                )
+            ),
+        )  # ResultRow because the query is of type SELECT
         if len(root) != 1:
             raise RuntimeError(
                 "Cannot identify root workflow! Notice that only Workflows can be visualized"
             )
 
-        workflow = root[0]["workflow"]  # type: rdflib.URIRef
+        workflow = root[0]["workflow"]
         return workflow
 
     @classmethod

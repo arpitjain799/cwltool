@@ -1,12 +1,15 @@
+"""Support utilities for CUDA."""
+
 import subprocess  # nosec
 import xml.dom.minidom  # nosec
-from typing import Tuple, cast
+from typing import Tuple
 
 from .loghandler import _logger
 from .utils import CWLObjectType
 
 
 def cuda_version_and_device_count() -> Tuple[str, int]:
+    """Determine the CUDA version and number of attached CUDA GPUs."""
     try:
         out = subprocess.check_output(["nvidia-smi", "-q", "-x"])  # nosec
     except Exception as e:
@@ -27,14 +30,10 @@ def cuda_check(cuda_req: CWLObjectType, requestCount: int) -> int:
             return 0
         versionf = float(version)
         if versionf < vmin:
-            _logger.warning(
-                "CUDA version '%s' is less than minimum version '%s'", version, vmin
-            )
+            _logger.warning("CUDA version '%s' is less than minimum version '%s'", version, vmin)
             return 0
         if requestCount > devices:
-            _logger.warning(
-                "Requested %d GPU devices but only %d available", requestCount, devices
-            )
+            _logger.warning("Requested %d GPU devices but only %d available", requestCount, devices)
             return 0
         return requestCount
     except Exception as e:

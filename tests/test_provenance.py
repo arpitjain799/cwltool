@@ -4,7 +4,7 @@ import pickle
 import sys
 import urllib
 from pathlib import Path
-from typing import Any, Generator
+from typing import IO, Any, Generator, cast
 
 import arcp
 import bagit
@@ -186,10 +186,19 @@ def test_directory_workflow(tmp_path: Path) -> None:
 
     # Input files should be captured by hash value,
     # even if they were inside a class: Directory
-    for (l, l_hash) in sha1.items():
+    for letter, l_hash in sha1.items():
         prefix = l_hash[:2]  # first 2 letters
         p = folder / "data" / prefix / l_hash
-        assert p.is_file(), f"Could not find {l} as {p}"
+        assert p.is_file(), f"Could not find {letter} as {p}"
+
+
+@needs_docker
+def test_no_data_files(tmp_path: Path) -> None:
+    folder = cwltool(
+        tmp_path,
+        get_data("tests/wf/conditional_step_no_inputs.cwl"),
+    )
+    check_bagit(folder)
 
 
 def check_output_object(base_path: Path) -> None:
@@ -286,15 +295,15 @@ def check_bagit(base_path: Path) -> None:
     assert not list(missing_tagfiles), "Some files only in tagmanifest"
     bag.validate()
     # TODO: Check other bag-info attributes
-    assert arcp.is_arcp_uri(bag.info.get("External-Identifier"))
+    assert arcp.is_arcp_uri(cast(str, bag.info.get("External-Identifier")))
 
 
 def find_arcp(base_path: Path) -> str:
     # First try to find External-Identifier
     bag = bagit.Bag(str(base_path))
-    ext_id = bag.info.get("External-Identifier")
+    ext_id = cast(str, bag.info.get("External-Identifier"))
     if arcp.is_arcp_uri(ext_id):
-        return str(ext_id)
+        return ext_id
     raise Exception("Can't find External-Identifier")
 
 
@@ -326,7 +335,7 @@ def check_ro(base_path: Path, nested: bool = False) -> None:
     g.parse(data=jsonld, format="json-ld", publicID=base)
     if os.environ.get("DEBUG"):
         print("Parsed manifest:\n\n")
-        g.serialize(sys.stdout, format="ttl")
+        g.serialize(cast(IO[bytes], sys.stdout), format="ttl")
     _ro = None
 
     for _ro in g.subjects(ORE.isDescribedBy, URIRef(base)):
@@ -338,19 +347,19 @@ def check_ro(base_path: Path, nested: bool = False) -> None:
         profile = dc
         break
     assert profile is not None, "Can't find profile with dct:conformsTo"
-    assert profile == URIRef(provenance_constants.CWLPROV_VERSION), (
-        "Unexpected cwlprov version " + profile
-    )
+    assert profile == URIRef(
+        provenance_constants.CWLPROV_VERSION
+    ), f"Unexpected cwlprov version {profile}"
 
     paths = []
     externals = []
     for aggregate in g.objects(_ro, ORE.aggregates):
-        if not arcp.is_arcp_uri(aggregate):
+        if not arcp.is_arcp_uri(cast(str, aggregate)):
             externals.append(aggregate)
             # Won't check external URIs existence here
             # TODO: Check they are not relative!
             continue
-        lfile = _arcp2file(base_path, aggregate)
+        lfile = _arcp2file(base_path, cast(str, aggregate))
         paths.append(os.path.relpath(lfile, base_path))
         assert os.path.isfile(lfile), f"Can't find aggregated {lfile}"
 
@@ -374,9 +383,7 @@ def check_ro(base_path: Path, nested: bool = False) -> None:
 
     packed = urllib.parse.urljoin(arcp_root, "/workflow/packed.cwl")
     primary_job = urllib.parse.urljoin(arcp_root, "/workflow/primary-job.json")
-    primary_prov_nt = urllib.parse.urljoin(
-        arcp_root, "/metadata/provenance/primary.cwlprov.nt"
-    )
+    primary_prov_nt = urllib.parse.urljoin(arcp_root, "/metadata/provenance/primary.cwlprov.nt")
     uuid = arcp.parse_arcp(arcp_root).uuid
 
     highlights = set(g.subjects(OA.motivatedBy, OA.highlighting))
@@ -451,7 +458,7 @@ def check_prov(
         g.parse(file=f, format="nt", publicID=arcp_root)
     if os.environ.get("DEBUG"):
         print("Parsed %s:\n\n" % prov_file)
-        g.serialize(sys.stdout, format="ttl")
+        g.serialize(cast(IO[bytes], sys.stdout), format="ttl")
     runs = set(g.subjects(RDF.type, WFPROV.WorkflowRun))
 
     # main workflow run URI (as urn:uuid:) should correspond to arcp uuid part
@@ -532,6 +539,7 @@ def check_prov(
             assert (d, RDF.type, PROV.Dictionary) in g
             assert (d, RDF.type, PROV.Collection) in g
             assert (d, RDF.type, PROV.Entity) in g
+            assert len(list(g.objects(d, CWLPROV.basename))) == 1
 
             files = set()
             for entry in g.objects(d, PROV.hadDictionaryMember):
@@ -583,8 +591,8 @@ def check_prov(
 
 
 @pytest.fixture
-def research_object() -> Generator[ResearchObject, None, None]:
-    re_ob = ResearchObject(StdFsAccess(""))
+def research_object(tmp_path: Path) -> Generator[ResearchObject, None, None]:
+    re_ob = ResearchObject(StdFsAccess(str(tmp_path / "ro")), temp_prefix_ro=str(tmp_path / "tmp"))
     yield re_ob
     re_ob.close()
 
@@ -761,8 +769,6 @@ def test_research_object() -> None:
     pass
 
 
-# Research object may need to be pickled (for Toil)
-
-
 def test_research_object_picklability(research_object: ResearchObject) -> None:
+    """Research object may need to be pickled (for Toil)."""
     assert pickle.dumps(research_object) is not None

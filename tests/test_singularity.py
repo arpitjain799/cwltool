@@ -3,6 +3,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from cwltool.main import main
 
 from .util import (
@@ -10,6 +12,7 @@ from .util import (
     get_main_output,
     needs_singularity,
     needs_singularity_2_6,
+    needs_singularity_3_or_newer,
     working_directory,
 )
 
@@ -57,7 +60,10 @@ def test_singularity_workflow(tmp_path: Path) -> None:
     assert error_code == 0
 
 
-def test_singularity_iwdr() -> None:
+def test_singularity_iwdr(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    singularity_dir = tmp_path / "singularity"
+    singularity_dir.mkdir()
+    monkeypatch.setenv("CWL_SINGULARITY_CACHE", str(singularity_dir))
     result_code = main(
         [
             "--singularity",
@@ -107,7 +113,7 @@ def test_singularity_local(tmp_path: Path) -> None:
 
 
 @needs_singularity_2_6
-def test_singularity_docker_image_id_in_tool(tmp_path: Path) -> None:
+def test_singularity2_docker_image_id_in_tool(tmp_path: Path) -> None:
     workdir = tmp_path / "working_dir"
     workdir.mkdir()
     with working_directory(workdir):
@@ -123,6 +129,31 @@ def test_singularity_docker_image_id_in_tool(tmp_path: Path) -> None:
             [
                 "--singularity",
                 get_data("tests/debian_image_id.cwl"),
+                "--message",
+                "hello",
+            ]
+        )
+        assert result_code1 == 0
+
+
+@needs_singularity_3_or_newer
+def test_singularity3_docker_image_id_in_tool(tmp_path: Path) -> None:
+    workdir = tmp_path / "working_dir"
+    workdir.mkdir()
+    with working_directory(workdir):
+        result_code, stdout, stderr = get_main_output(
+            [
+                "--singularity",
+                get_data("tests/sing_pullfolder_test.cwl"),
+                "--message",
+                "hello",
+            ]
+        )
+        assert result_code == 0
+        result_code1, stdout, stderr = get_main_output(
+            [
+                "--singularity",
+                get_data("tests/debian_image_id2.cwl"),
                 "--message",
                 "hello",
             ]

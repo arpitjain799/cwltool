@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Any, List
 
 import pytest
+from cwl_utils import sandboxjs
 
-from cwltool import sandboxjs
 from cwltool.factory import Factory
 from cwltool.loghandler import _logger, configure_logging
 
@@ -28,15 +28,16 @@ _logger.setLevel(logging.DEBUG)
 
 @pytest.mark.parametrize("version,supported", node_versions)
 def test_node_version(version: str, supported: bool, mocker: Any) -> None:
-    mocked_subprocess = mocker.patch("cwltool.sandboxjs.subprocess")
+    mocked_subprocess = mocker.patch("cwl_utils.sandboxjs.subprocess")
     mocked_subprocess.check_output = mocker.Mock(return_value=version)
 
     assert sandboxjs.check_js_threshold_version("node") == supported
 
 
 def test_value_from_two_concatenated_expressions() -> None:
-    sandboxjs.have_node_slim = False
-    sandboxjs.localdata = threading.local()
+    js_engine = sandboxjs.get_js_engine()
+    js_engine.have_node_slim = False  # type: ignore[attr-defined]
+    js_engine.localdata = threading.local()  # type: ignore[attr-defined]
     factory = Factory()
     echo = factory.make(get_data("tests/wf/vf-concat.cwl"))
     file = {"class": "File", "location": get_data("tests/wf/whale.txt")}
@@ -62,6 +63,10 @@ def hide_nodejs(temp_dir: Path) -> str:
                 if entry not in ("nodejs", "node"):
                     os.symlink(os.path.join(dirname, entry), new_dir / entry)
             paths.append(str(new_dir))
+            dirname_path = Path(dirname)
+            for path in paths:
+                if Path(path).resolve() == dirname_path:
+                    paths.remove(path)
     return ":".join(paths)
 
 
@@ -70,8 +75,9 @@ def test_value_from_two_concatenated_expressions_podman(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Javascript test using podman."""
-    sandboxjs.have_node_slim = False
-    sandboxjs.localdata = threading.local()
+    js_engine = sandboxjs.get_js_engine()
+    js_engine.have_node_slim = False  # type: ignore[attr-defined]
+    js_engine.localdata = threading.local()  # type: ignore[attr-defined]
     new_paths = hide_nodejs(tmp_path)
     factory = Factory()
     factory.loading_context.podman = True
@@ -89,14 +95,20 @@ def test_value_from_two_concatenated_expressions_singularity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Javascript test using Singularity."""
-    sandboxjs.have_node_slim = False
-    sandboxjs.localdata = threading.local()
-    new_paths = hide_nodejs(tmp_path)
+    js_engine = sandboxjs.get_js_engine()
+    js_engine.have_node_slim = False  # type: ignore[attr-defined]
+    js_engine.localdata = threading.local()  # type: ignore[attr-defined]
+    hide_base = tmp_path / "hide"
+    hide_base.mkdir()
+    new_paths = hide_nodejs(hide_base)
+    singularity_cache = tmp_path / "singularity"
+    singularity_cache.mkdir()
     factory = Factory()
     factory.loading_context.singularity = True
     factory.loading_context.debug = True
     factory.runtime_context.debug = True
     with monkeypatch.context() as m:
+        m.setenv("CWL_SINGULARITY_CACHE", str(singularity_cache))
         m.setenv("PATH", new_paths)
         echo = factory.make(get_data("tests/wf/vf-concat.cwl"))
         file = {"class": "File", "location": get_data("tests/wf/whale.txt")}
@@ -106,7 +118,7 @@ def test_value_from_two_concatenated_expressions_singularity(
 def test_caches_js_processes(mocker: Any) -> None:
     sandboxjs.exec_js_process("7", context="{}")
 
-    mocked_new_js_proc = mocker.patch("cwltool.sandboxjs.new_js_proc")
+    mocked_new_js_proc = mocker.patch("cwl_utils.sandboxjs.new_js_proc")
     sandboxjs.exec_js_process("7", context="{}")
 
     mocked_new_js_proc.assert_not_called()

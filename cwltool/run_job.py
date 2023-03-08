@@ -12,9 +12,7 @@ def handle_software_environment(cwl_env: Dict[str, str], script: str) -> Dict[st
     exec_env["_CWLTOOL"] = "1"
     res = subprocess.run(["bash", script], shell=False, env=exec_env)  # nosec
     if res.returncode != 0:
-        sys.stderr.write(
-            "Error while using SoftwareRequirements to modify environment\n"
-        )
+        sys.stderr.write("Error while using SoftwareRequirements to modify environment\n")
         return cwl_env
 
     env = cwl_env.copy()
@@ -42,7 +40,7 @@ def main(argv: List[str]) -> int:
       "stdout_path": a string (or a null) giving the path that should receive the STDOUT
       "stderr_path": a string (or a null) giving the path that should receive the STDERR
 
-    The second argument is optional, it specifes a shell script to execute prior,
+    The second argument is optional, it specifies a shell script to execute prior,
       and the environment variables it sets will be combined with the environment
       variables from the "env" key in the JSON dictionary from the first argument.
     """

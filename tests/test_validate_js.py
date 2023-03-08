@@ -1,9 +1,9 @@
 import pytest
+from cwl_utils.sandboxjs import code_fragment_to_js
 from schema_salad.avro.schema import Names
 from schema_salad.utils import yaml_no_ts
 
 from cwltool import process, validate_js
-from cwltool.sandboxjs import code_fragment_to_js
 
 TEST_CWL = """
 cwlVersion: v1.0
@@ -69,23 +69,15 @@ def test_js_hint_reports_invalid_js() -> None:
 
 
 def test_js_hint_warn_on_es6() -> None:
-    assert (
-        len(validate_js.jshint_js(code_fragment_to_js("((() => 4)())"), []).errors) == 1
-    )
+    assert len(validate_js.jshint_js(code_fragment_to_js("((() => 4)())"), []).errors) == 1
 
 
 def test_js_hint_error_on_undefined_name() -> None:
-    assert (
-        len(validate_js.jshint_js(code_fragment_to_js("undefined_name()")).errors) == 1
-    )
+    assert len(validate_js.jshint_js(code_fragment_to_js("undefined_name()")).errors) == 1
 
 
 def test_js_hint_set_defined_name() -> None:
     assert (
-        len(
-            validate_js.jshint_js(
-                code_fragment_to_js("defined_name()"), ["defined_name"]
-            ).errors
-        )
+        len(validate_js.jshint_js(code_fragment_to_js("defined_name()"), ["defined_name"]).errors)
         == 0
     )

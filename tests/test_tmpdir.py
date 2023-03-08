@@ -15,7 +15,7 @@ from cwltool.context import LoadingContext, RuntimeContext
 from cwltool.docker import DockerCommandLineJob
 from cwltool.job import JobBase
 from cwltool.main import main
-from cwltool.pathmapper import MapperEnt, PathMapper
+from cwltool.pathmapper import MapperEnt
 from cwltool.stdfsaccess import StdFsAccess
 from cwltool.update import INTERNAL_VERSION, ORIGINAL_CWLVERSION
 from cwltool.utils import create_tmp_dir
@@ -45,7 +45,7 @@ def test_docker_commandLineTool_job_tmpdir_prefix(tmp_path: Path) -> None:
                     "requirements": [
                         {
                             "class": "DockerRequirement",
-                            "dockerPull": "docker.io/debian:stable",
+                            "dockerPull": "docker.io/debian:stable-slim",
                         }
                     ],
                 }
@@ -109,18 +109,47 @@ def test_commandLineTool_job_tmpdir_prefix(tmp_path: Path) -> None:
 
 
 @needs_docker
-def test_dockerfile_tmpdir_prefix(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_dockerfile_tmpdir_prefix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test that DockerCommandLineJob.get_image respects temp directory directives."""
-    monkeypatch.setattr(
-        target=subprocess, name="check_call", value=lambda *args, **kwargs: True
+    monkeypatch.setattr(target=subprocess, name="check_call", value=lambda *args, **kwargs: True)
+    (tmp_path / "out").mkdir()
+    tmp_outdir_prefix = tmp_path / "out" / "1"
+    (tmp_path / "3").mkdir()
+    tmpdir_prefix = str(tmp_path / "3" / "ttmp")
+    runtime_context = RuntimeContext(
+        {"tmpdir_prefix": tmpdir_prefix, "user_space_docker_cmd": None}
     )
-    tmp_outdir_prefix = tmp_path / "1"
-    assert DockerCommandLineJob.get_image(
+    builder = Builder(
+        {},
+        [],
+        [],
+        {},
+        schema.Names(),
+        [],
+        [],
+        {},
+        None,
+        None,
+        StdFsAccess,
+        StdFsAccess(""),
+        None,
+        0.1,
+        False,
+        False,
+        False,
+        "no_listing",
+        runtime_context.get_outdir(),
+        runtime_context.get_tmpdir(),
+        runtime_context.get_stagedir(),
+        INTERNAL_VERSION,
+        "docker",
+    )
+    assert DockerCommandLineJob(
+        builder, {}, CommandLineTool.make_path_mapper, [], [], ""
+    ).get_image(
         {
             "class": "DockerRequirement",
-            "dockerFile": "FROM debian:stable",
+            "dockerFile": "FROM debian:stable-slim",
             "dockerImageId": sys._getframe().f_code.co_name,
         },
         pull_image=True,
@@ -159,14 +188,14 @@ def test_docker_tmpdir_prefix(tmp_path: Path) -> None:
         False,
         False,
         False,
-        "",
+        "no_listing",
         runtime_context.get_outdir(),
         runtime_context.get_tmpdir(),
         runtime_context.get_stagedir(),
         INTERNAL_VERSION,
         "docker",
     )
-    job = DockerCommandLineJob(builder, {}, PathMapper, [], [], "")
+    job = DockerCommandLineJob(builder, {}, CommandLineTool.make_path_mapper, [], [], "")
     runtime: List[str] = []
 
     volume_writable_file = MapperEnt(
@@ -189,9 +218,7 @@ def test_docker_tmpdir_prefix(tmp_path: Path) -> None:
         resolved=str(resolved_writable_dir), target="bar", type=None, staged=None
     )
     (tmp_path / "2").mkdir()
-    job.add_writable_directory_volume(
-        runtime, volume_dir, None, str(tmp_path / "2" / "dir")
-    )
+    job.add_writable_directory_volume(runtime, volume_dir, None, str(tmp_path / "2" / "dir"))
     children = sorted((tmp_path / "2").glob("*"))
     assert len(children) == 1
     subdir = tmp_path / "2" / children[0]
@@ -204,9 +231,7 @@ def test_docker_tmpdir_prefix(tmp_path: Path) -> None:
 
     volume_file = MapperEnt(resolved="Hoopla!", target="baz", type=None, staged=None)
     (tmp_path / "4").mkdir()
-    job.create_file_and_add_volume(
-        runtime, volume_file, None, None, str(tmp_path / "4" / "file")
-    )
+    job.create_file_and_add_volume(runtime, volume_file, None, None, str(tmp_path / "4" / "file"))
     children = sorted((tmp_path / "4").glob("*"))
     assert len(children) == 1
     subdir = tmp_path / "4" / children[0]

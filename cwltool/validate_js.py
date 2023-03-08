@@ -15,6 +15,9 @@ from typing import (
     cast,
 )
 
+from cwl_utils.errors import SubstitutionError
+from cwl_utils.expression import scanner as scan_expression
+from cwl_utils.sandboxjs import code_fragment_to_js, exec_js_process
 from pkg_resources import resource_stream
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from schema_salad.avro.schema import (
@@ -29,14 +32,11 @@ from schema_salad.utils import json_dumps
 from schema_salad.validate import validate_ex
 
 from .errors import WorkflowException
-from .expression import SubstitutionError
-from .expression import scanner as scan_expression
 from .loghandler import _logger
-from .sandboxjs import code_fragment_to_js, exec_js_process
 
 
-def is_expression(tool, schema):
-    # type: (Any, Optional[Schema]) -> bool
+def is_expression(tool: Any, schema: Optional[Schema]) -> bool:
+    """Test a field/schema combo to see if it is a CWL Expression."""
     return (
         isinstance(schema, EnumSchema)
         and schema.name == "org.w3id.cwl.cwl.Expression"
@@ -45,12 +45,13 @@ def is_expression(tool, schema):
 
 
 class SuppressLog(logging.Filter):
-    def __init__(self, name):  # type: (str) -> None
+    def __init__(self, name: str) -> None:
         """Initialize this log suppressor."""
         name = str(name)
         super().__init__(name)
 
-    def filter(self, record):  # type: (logging.LogRecord) -> bool
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Never accept a record."""
         return False
 
 
@@ -157,21 +158,17 @@ def jshint_js(
         # NOTE: we need to assign to ob, as the expression {validateJS: validateJS} as an expression
         # is interpreted as a block with a label `validateJS`
         jshint_functions_text += (
-            "\n"
-            + res2.read().decode("utf-8")
-            + "\nvar ob = {validateJS: validateJS}; ob"
+            "\n" + res2.read().decode("utf-8") + "\nvar ob = {validateJS: validateJS}; ob"
         )
 
     returncode, stdout, stderr = exec_js_process(
-        "validateJS(%s)"
-        % json_dumps({"code": js_text, "options": options, "globals": globals}),
+        "validateJS(%s)" % json_dumps({"code": js_text, "options": options, "globals": globals}),
         timeout=eval_timeout,
         context=jshint_functions_text,
         container_engine=container_engine,
     )
 
-    def dump_jshint_error():
-        # type: () -> None
+    def dump_jshint_error() -> None:
         raise RuntimeError(
             'jshint failed to run successfully\nreturncode: %d\nstdout: "%s"\nstderr: "%s"'
             % (returncode, stdout, stderr)
@@ -188,7 +185,7 @@ def jshint_js(
     except ValueError:
         dump_jshint_error()
 
-    jshint_errors = []  # type: List[str]
+    jshint_errors: List[str] = []
 
     js_text_lines = js_text.split("\n")
 
@@ -204,9 +201,8 @@ def jshint_js(
     return JSHintJSReturn(jshint_errors, jshint_json.get("globals", []))
 
 
-def print_js_hint_messages(
-    js_hint_messages: List[str], source_line: Optional[SourceLine]
-) -> None:
+def print_js_hint_messages(js_hint_messages: List[str], source_line: Optional[SourceLine]) -> None:
+    """Log the message from JSHint, using the line number."""
     if source_line is not None:
         for js_hint_message in js_hint_messages:
             _logger.warning(source_line.makeError(js_hint_message))
@@ -219,7 +215,6 @@ def validate_js_expressions(
     container_engine: str = "docker",
     eval_timeout: float = 60,
 ) -> None:
-
     if tool.get("requirements") is None:
         return
     debug = _logger.isEnabledFor(logging.DEBUG)
@@ -259,7 +254,7 @@ def validate_js_expressions(
         except SubstitutionError as se:
             if source_line:
                 source_line.raise_type = WorkflowException
-                raise source_line.makeError(str(se))
+                raise source_line.makeError(str(se)) from se
             else:
                 raise se
 
